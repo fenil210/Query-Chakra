@@ -3,7 +3,7 @@ import sys
 import pandas as pd
 from dotenv import load_dotenv
 import sqlalchemy
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text 
 import json
 
 nv_path = os.path.join(os.path.dirname(__file__), 'config', '.env')
@@ -31,17 +31,17 @@ class dbactivities:
 
 
     def get_databases(self):
-        query = """
+        query = text("""
         SELECT SCHEMA_NAME
         FROM INFORMATION_SCHEMA.SCHEMATA
         WHERE SCHEMA_NAME NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys');
-        """
+        """)
         with self.engine.connect() as connection:
             result = connection.execute(query)
-            dbs = [row['SCHEMA_NAME'] for row in result]
+            dbs = [row[0] for row in result]  # Access the first (and only) column of each row
         print(dbs)
         return dbs
-    
+        
     def switch_db(self,db):
         self.database = db
         try:
@@ -54,22 +54,15 @@ class dbactivities:
             print(f'Unable to establish a connection because of the below reason\n{e}')
             sys.exit(1)
 
-    def get_tables(self,database):
+    def get_tables(self, database):
         # SQL query to fetch all table names from the database
-        query = f"""
-        SELECT TABLE_NAME, TABLE_ROWS, ENGINE, TABLE_COMMENT
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = '{database}' AND TABLE_TYPE = 'BASE TABLE'
-        ORDER BY TABLE_NAME;
-
-        """
+        query = text("SELECT TABLE_NAME, TABLE_ROWS, ENGINE, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = :database AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME;")
         # Execute the query using the engine
         with self.engine.connect() as connection:
-            result = connection.execute(query)
+            result = connection.execute(query, {"database": database})
 
-
-            # dbtables = [f'{row[0]}.{row[1]}.{row[2]}' for row in result if 'BASE TABLE'==row[3]] # fetch all the tables
-            dbtables = [f'{row[0]}.{row[1]}.{row[2]}' for row in result if ''==row[3]]
+            print("result", result)
+            dbtables = [f'{row[0]}.{row[1]}.{row[2]}' for row in result]
             self.tables = dbtables 
         print("**********************************")
         print(dbtables)
