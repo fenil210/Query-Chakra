@@ -30,7 +30,7 @@ connectionstring = {
     'Database': os.environ['DB'],
     'user': os.environ['USER'],
     'host': os.environ['HOST'],
-    'port_mysql': os.environ['PORT_MYSQL']
+    'db_port': os.environ['DB_PORT']
 }
 
 # Global variables
@@ -373,4 +373,6 @@ def internal_error(error):
                          db_data=connectionstring), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port=int(os.environ.get('PORT', 5000))
+    print("port",port)
+    app.run(debug=True, host='0.0.0.0', port=port)
