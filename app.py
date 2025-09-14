@@ -5,7 +5,6 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 from dbconnection import dbactivities
-import pygwalker as pyg
 import pandas as pd 
 from llama import LLM 
 import time 
@@ -279,13 +278,7 @@ def output_page():
 def render_dashboard():
     """Render PyGWalker dashboard"""
     try:
-        if isinstance(current_table, pd.DataFrame):
-            df = current_table
-        else:
-            df = pd.DataFrame(current_table)
-            
-        walker = pyg.walk(df, hideDataSourceConfig=True)
-        walker_html = walker.to_html()
+        walker_html = "Dashboard feature is currently disabled."
         return walker_html
     except Exception as e:
         return f"Dashboard generation failed: {str(e)}", 500
