@@ -2,6 +2,7 @@ from flask import Flask, request, render_template, redirect, url_for, jsonify, s
 import os
 import sys
 import json
+from datetime import datetime
 from dotenv import load_dotenv
 from dbconnection import dbactivities
 import pygwalker as pyg
@@ -38,6 +39,51 @@ current_query = ''
 current_table = 'nothing'
 time_difference = 0
 
+def get_conversation_history():
+    """Get structured conversation history from session"""
+    return session.get('conversation_history', [])
+
+def add_to_history(user_query, sql_query, model_used, time_taken, status='generated'):
+    """Add a new conversation entry to history with proper structure"""
+    history = get_conversation_history()
+    
+    new_entry = {
+        'id': len(history) + 1,
+        'timestamp': datetime.now().isoformat(),
+        'user_query': user_query,
+        'sql_query': sql_query,
+        'model_used': model_used,
+        'time_taken': time_taken,
+        'status': status,  # generated, executed, error
+        'database': connectionstring['Database']
+    }
+    
+    history.append(new_entry)
+    
+    # Keep only last 50 conversations to prevent session bloat
+    if len(history) > 50:
+        history = history[-50:]
+    
+    session['conversation_history'] = history
+    return new_entry
+
+def format_history_for_llm():
+    """Format history for LLM context (backward compatibility)"""
+    history = get_conversation_history()
+    if not history:
+        return ""
+    
+    # Take last 10 conversations for context
+    recent_history = history[-10:]
+    formatted = []
+    
+    for entry in recent_history:
+        if entry['status'] != 'error':
+            formatted.append(f"User: {entry['user_query']}")
+            formatted.append(f"SQL: {entry['sql_query']}")
+    
+    return "\n".join(formatted)
+
 @app.route('/')
 def index():
     """Main index page with enhanced model selection"""
@@ -48,9 +94,8 @@ def index():
     # Get available models
     available_models = llm_model.get_available_models()
     
-    # Get chat history
-    chat_history = session.get('history', "").split("\n") if session.get('history') else []
-    chat_history = [msg.strip() for msg in chat_history if msg.strip()]  # Clean empty messages
+    # Get structured chat history
+    chat_history = get_conversation_history()
     
     return render_template(
         'index.html', 
@@ -81,29 +126,32 @@ def process_textarea():
         model_provider = content['model_provider']
         model_name = content['model_name']
         
-        # Get conversation history
-        history = session.get('history', "")
+        # Get conversation history for LLM context
+        history = format_history_for_llm()
         
         # Generate query
         response, time_taken = llm_model.generate_query(
             schema, query, history, model_provider, model_name
         )
         
-        # Update session history
-        if response and not response.startswith("Error") and not response.startswith("I can only help"):
-            new_entry = f"User: {query}\nSQL: {response}"
-            session['history'] = history + "\n" + new_entry if history else new_entry
+        # Determine status
+        status = 'error' if (response and (response.startswith("Error") or response.startswith("I can only help"))) else 'generated'
+        
+        # Add to structured history
+        model_used = f"{model_provider}:{model_name}"
+        entry = add_to_history(query, response, model_used, round(time_taken / 60, 4), status)
         
         # Store current query and time
         global current_query, time_difference
         current_query = response
-        time_difference = round(time_taken / 60, 4)  # More precision
+        time_difference = round(time_taken / 60, 4)
         
         return {
             'success': True,
             'query': response, 
             'time': time_difference,
-            'model_used': f"{model_provider}:{model_name}"
+            'model_used': model_used,
+            'history_entry': entry
         }
         
     except Exception as e:
@@ -162,7 +210,7 @@ def change_db():
             connectionstring['Database'] = db
             db_schema = dbcon.index()
             # Clear history when switching databases
-            session.pop('history', None)
+            session.pop('conversation_history', None)
             return {'status': 200, 'msg': 'changed successfully'}
             
     except Exception as e:
@@ -199,9 +247,14 @@ def output_page():
         columns = list(table.keys())
         indices = list(table[columns[0]].keys()) if columns and table[columns[0]] else []
         
+        # Update the last history entry status to executed
+        history = get_conversation_history()
+        if history:
+            history[-1]['status'] = 'executed'
+            session['conversation_history'] = history
+        
         global time_difference
-        chat_history = session.get('history', "").split("\n") if session.get('history') else []
-        chat_history = [msg.strip() for msg in chat_history if msg.strip()]
+        chat_history = get_conversation_history()
         
         return render_template('output.html', 
                              db_data=current_query, 
@@ -211,6 +264,13 @@ def output_page():
                              chat_history=chat_history)
                              
     except Exception as e:
+        # Update history entry status to error
+        history = get_conversation_history()
+        if history:
+            history[-1]['status'] = 'error'
+            history[-1]['error_message'] = str(e)
+            session['conversation_history'] = history
+            
         return render_template('error.html', 
                              error_message=f"Query execution failed: {str(e)}",
                              db_data=connectionstring)
@@ -230,20 +290,77 @@ def render_dashboard():
     except Exception as e:
         return f"Dashboard generation failed: {str(e)}", 500
 
+@app.route('/history_management', methods=['GET', 'POST'])
+def history_management():
+    """Manage conversation history"""
+    if request.method == 'GET':
+        action = request.args.get('action', 'get')
+        
+        if action == 'get':
+            return {
+                'success': True,
+                'history': get_conversation_history(),
+                'count': len(get_conversation_history())
+            }
+        elif action == 'export':
+            history = get_conversation_history()
+            export_data = {
+                'export_timestamp': datetime.now().isoformat(),
+                'database': connectionstring['Database'],
+                'conversation_count': len(history),
+                'conversations': history
+            }
+            return {
+                'success': True,
+                'data': export_data,
+                'filename': f"querychakra_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            }
+    
+    elif request.method == 'POST':
+        content = request.get_json()
+        action = content.get('action')
+        
+        if action == 'delete':
+            entry_id = content.get('entry_id')
+            history = get_conversation_history()
+            history = [entry for entry in history if entry['id'] != entry_id]
+            session['conversation_history'] = history
+            return {'success': True, 'message': 'Entry deleted'}
+            
+        elif action == 'clear_all':
+            session.pop('conversation_history', None)
+            return {'success': True, 'message': 'All history cleared'}
+            
+        elif action == 'import':
+            import_data = content.get('data', [])
+            if isinstance(import_data, list):
+                session['conversation_history'] = import_data
+                return {'success': True, 'message': f'Imported {len(import_data)} conversations'}
+            else:
+                return {'success': False, 'error': 'Invalid import data format'}, 400
+    
+    return {'success': False, 'error': 'Invalid request'}, 400
+
 @app.route('/reset_history', methods=['GET', 'POST'])
 def reset_history():
-    """Clear conversation history"""
-    session.pop('history', None)
+    """Clear conversation history (backward compatibility)"""
+    session.pop('conversation_history', None)
     return redirect(url_for('index'))
 
 @app.route('/export_history')
 def export_history():
-    """Export conversation history as JSON"""
+    """Export conversation history as JSON (backward compatibility)"""
     try:
-        history = session.get('history', "")
+        history = get_conversation_history()
+        export_data = {
+            'export_timestamp': datetime.now().isoformat(),
+            'database': connectionstring['Database'],
+            'conversation_count': len(history),
+            'conversations': history
+        }
         return {
             'success': True,
-            'history': history,
+            'history': export_data,
             'timestamp': time.time()
         }
     except Exception as e:

@@ -1,6 +1,6 @@
-// QueryChakra Frontend JavaScript - Fixed Version
+// QueryChakra Frontend JavaScript - Enhanced History System
 $(document).ready(function() {
-    console.log('DOM Ready - Initializing QueryChakra');
+    console.log('DOM Ready - Initializing QueryChakra with Enhanced History');
     
     // Initialize all components
     initializeModelSelection();
@@ -9,13 +9,14 @@ $(document).ready(function() {
     initializeDropdowns();
     initializeMasterCheckbox();
     initializeKeyboardShortcuts();
+    initializeHistoryManagement();
     
     // Clear prompt on load
     $("#prompt").val("");
     console.log('QueryChakra initialized successfully');
 });
 
-// Notification system
+// Enhanced Notification system
 function initializeNotifications() {
     window.showNotification = function(message, type = 'info', duration = 5000) {
         const container = document.getElementById('notification-container') || document.body;
@@ -25,8 +26,8 @@ function initializeNotifications() {
         notification.style.color = 'white';
         notification.innerHTML = `
             <div class="flex items-center justify-between">
-                <span>${message}</span>
-                <button onclick="this.parentElement.parentElement.remove()" class="ml-2 text-white hover:text-gray-200">×</button>
+                <span class="text-sm">${message}</span>
+                <button onclick="this.parentElement.parentElement.remove()" class="ml-2 text-white hover:text-gray-200 text-lg font-bold">×</button>
             </div>
         `;
         
@@ -34,9 +35,162 @@ function initializeNotifications() {
         
         setTimeout(() => {
             if (notification.parentElement) {
-                notification.remove();
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => notification.remove(), 300);
             }
         }, duration);
+    }
+}
+
+// History Management Functions
+function initializeHistoryManagement() {
+    console.log('Initializing history management...');
+    
+    // Export history
+    $('#export-history').off('click').on('click', function() {
+        console.log('Export history clicked');
+        
+        $.ajax({
+            url: '/history_management?action=export',
+            type: 'GET',
+            success: function(response) {
+                if (response.success) {
+                    const dataStr = JSON.stringify(response.data, null, 2);
+                    const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                    const url = URL.createObjectURL(dataBlob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = response.filename || 'querychakra_history.json';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    showNotification('History exported successfully!', 'success');
+                } else {
+                    showNotification('Failed to export history', 'error');
+                }
+            },
+            error: function() {
+                showNotification('Export request failed', 'error');
+            }
+        });
+    });
+    
+    // Clear all history
+    $('#clear-history').off('click').on('click', function() {
+        console.log('Clear history clicked');
+        
+        if (confirm('Are you sure you want to clear all conversation history? This action cannot be undone.')) {
+            $.ajax({
+                url: '/history_management',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({action: 'clear_all'}),
+                success: function(response) {
+                    if (response.success) {
+                        showNotification('History cleared successfully', 'success');
+                        setTimeout(() => window.location.reload(), 1500);
+                    } else {
+                        showNotification('Failed to clear history', 'error');
+                    }
+                },
+                error: function() {
+                    showNotification('Clear request failed', 'error');
+                }
+            });
+        }
+    });
+}
+
+// Global functions for conversation management
+window.deleteConversation = function(conversationId) {
+    console.log('Delete conversation:', conversationId);
+    
+    if (confirm('Are you sure you want to delete this conversation?')) {
+        $.ajax({
+            url: '/history_management',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({action: 'delete', entry_id: conversationId}),
+            success: function(response) {
+                if (response.success) {
+                    $(`[data-conversation-id="${conversationId}"]`).fadeOut(300, function() {
+                        $(this).remove();
+                        updateHistoryStats();
+                    });
+                    showNotification('Conversation deleted', 'success', 2000);
+                } else {
+                    showNotification('Failed to delete conversation', 'error');
+                }
+            },
+            error: function() {
+                showNotification('Delete request failed', 'error');
+            }
+        });
+    }
+};
+
+window.reuseQuery = function(sqlQuery) {
+    console.log('Reuse query:', sqlQuery.substring(0, 50) + '...');
+    
+    $('#prompt').val(sqlQuery);
+    
+    // Update UI state for reused query
+    $('#request-query').addClass('hidden');
+    $('#execute-query').removeClass('hidden');
+    $('#clear-prompt').addClass('hidden');
+    $('#reset-prompt').removeClass('hidden');
+    
+    // Scroll to top
+    $('html, body').animate({scrollTop: 0}, 500);
+    
+    showNotification('Query loaded for execution', 'info', 2000);
+};
+
+window.copyToClipboard = function(text) {
+    console.log('Copy to clipboard:', text.substring(0, 50) + '...');
+    
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function() {
+            showNotification('SQL query copied to clipboard', 'success', 2000);
+        }).catch(function() {
+            fallbackCopyTextToClipboard(text);
+        });
+    } else {
+        fallbackCopyTextToClipboard(text);
+    }
+};
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+        document.execCommand('copy');
+        showNotification('SQL query copied to clipboard', 'success', 2000);
+    } catch (err) {
+        showNotification('Failed to copy to clipboard', 'error');
+    }
+    
+    document.body.removeChild(textArea);
+}
+
+function updateHistoryStats() {
+    const remainingConversations = $('.conversation-item').length;
+    if (remainingConversations === 0) {
+        // Reload page to show empty state
+        setTimeout(() => window.location.reload(), 1000);
+    } else {
+        // Update stats counter
+        $('.history-stats .bg-blue-100').text(`${remainingConversations} conversations`);
     }
 }
 
@@ -55,12 +209,8 @@ function initializeModelSelection() {
         return;
     }
     
-    // Model data is now directly available as window.availableModels
     const availableModels = window.availableModels || {"ollama": [], "groq": []};
     console.log('Available models loaded:', availableModels);
-    
-    // Don't overwrite provider select - it's already populated by template
-    console.log('Provider select already has options:', providerSelect.options.length);
     
     // Provider change handler
     providerSelect.addEventListener('change', function() {
@@ -101,7 +251,7 @@ function initializeModelSelection() {
     console.log('Model selection initialized');
 }
 
-// Button initialization
+// Enhanced Button initialization
 function initializeButtons() {
     console.log('Initializing buttons...');
     
@@ -110,6 +260,7 @@ function initializeButtons() {
         console.log('Clear button clicked');
         $("#prompt").val("");
         hideAllMessages();
+        localStorage.removeItem('queryChakra_lastQuery');
         showNotification('Prompt cleared', 'info', 2000);
     });
     
@@ -123,6 +274,9 @@ function initializeButtons() {
             return;
         }
         
+        // Show loading state for validation
+        $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i>Validating...');
+        
         $.ajax({
             url: "/validate_query",
             type: "POST",
@@ -131,14 +285,17 @@ function initializeButtons() {
             success: function(response) {
                 console.log('Validation response:', response);
                 if (response.valid) {
-                    showNotification('Query validation passed', 'success');
+                    showNotification('✓ Query validation passed', 'success');
                 } else {
-                    showNotification('Query validation failed: ' + response.message, 'warning');
+                    showNotification('⚠ Query validation: ' + response.message, 'warning', 7000);
                 }
             },
             error: function(xhr, status, error) {
                 console.error('Validation error:', error);
                 showNotification('Validation service unavailable', 'error');
+            },
+            complete: function() {
+                $('#validate-query').prop('disabled', false).html('<i class="fas fa-search mr-1"></i>Validate Query');
             }
         });
     });
@@ -159,12 +316,14 @@ function initializeButtons() {
         if (!prompt) {
             $(".warningtext").removeClass('hidden');
             showNotification('Please enter a query', 'warning');
+            $("#prompt").focus();
             return;
         }
         
         if (!provider || !model) {
             $(".warningmodel").removeClass('hidden');
             showNotification('Please select a model provider and model', 'warning');
+            $("#model-provider").focus();
             return;
         }
         
@@ -218,16 +377,23 @@ function initializeButtons() {
                     $("#reset-prompt").removeClass('hidden');
                     $(".successtext").removeClass('hidden');
                     
-                    showNotification('SQL query generated successfully!', 'success');
+                    // Save to localStorage
+                    localStorage.setItem('queryChakra_lastQuery', response.query.trim());
+                    
+                    showNotification('✓ SQL query generated successfully!', 'success');
+                    
+                    // Auto-scroll to show the generated query
+                    $("#prompt")[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+                    
                 } else {
-                    showNotification(`Generation failed: ${response.error}`, 'error');
+                    showNotification(`Generation failed: ${response.error}`, 'error', 8000);
                 }
             },
             error: function(xhr, status, error) {
                 console.error('Generate SQL error:', xhr.responseJSON || error);
                 hideLoadingState();
-                const errorMsg = xhr.responseJSON?.error || 'Request failed';
-                showNotification(`Error: ${errorMsg}`, 'error');
+                const errorMsg = xhr.responseJSON?.error || 'Request failed. Please check your connection and try again.';
+                showNotification(`Error: ${errorMsg}`, 'error', 8000);
             }
         });
     });
@@ -242,6 +408,9 @@ function initializeButtons() {
             return;
         }
         
+        // Show loading state
+        $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i>Executing...');
+        
         $.ajax({
             url: "/clean_query",
             type: "POST",
@@ -250,16 +419,18 @@ function initializeButtons() {
             success: function(response) {
                 console.log('Execute response:', response);
                 if (response.success || response === 'done') {
-                    showNotification('Executing query...', 'info', 2000);
+                    showNotification('⚡ Executing query...', 'info', 2000);
                     setTimeout(() => {
                         window.location.href = '/output_page';
                     }, 1000);
                 } else {
                     showNotification(`Query preparation failed: ${response.error}`, 'error');
+                    $('#execute-query').prop('disabled', false).html('<i class="fas fa-play mr-1"></i>Execute Query');
                 }
             },
             error: function() {
                 showNotification('Failed to prepare query for execution', 'error');
+                $('#execute-query').prop('disabled', false).html('<i class="fas fa-play mr-1"></i>Execute Query');
             }
         });
     });
@@ -273,13 +444,14 @@ function initializeButtons() {
         $("#execute-query").addClass('hidden');
         $("#clear-prompt").removeClass('hidden');
         $("#reset-prompt").addClass('hidden');
+        localStorage.removeItem('queryChakra_lastQuery');
         showNotification('Interface reset', 'info', 2000);
     });
     
     console.log('Buttons initialized');
 }
 
-// Modal functionality
+// Modal and dropdown functionality
 function initializeDropdowns() {
     // Connection info modal
     $("#openModalButton").off('click').on('click', function() {
@@ -287,8 +459,15 @@ function initializeDropdowns() {
         $("#myModal").removeClass('hidden');
     });
     
-    $("#closeModalButton").off('click').on('click', function() {
+    $("#closeModalButton, #overlay").off('click').on('click', function() {
         $("#myModal").addClass('hidden');
+    });
+    
+    // Close modal on Escape key
+    $(document).off('keydown.modal').on('keydown.modal', function(e) {
+        if (e.key === 'Escape' && !$("#myModal").hasClass('hidden')) {
+            $("#myModal").addClass('hidden');
+        }
     });
     
     // Database dropdown
@@ -297,7 +476,7 @@ function initializeDropdowns() {
         const selection = $(this).text().trim();
         console.log('Database selected:', selection);
         
-        showNotification('Switching database...', 'info');
+        showNotification('🔄 Switching database...', 'info');
         
         $.ajax({
             url: "/change_db",
@@ -307,10 +486,10 @@ function initializeDropdowns() {
             success: function(response) {
                 console.log('DB change response:', response);
                 if (response['status'] == 200) {
-                    showNotification('Database switched successfully', 'success');
+                    showNotification('✓ Database switched successfully', 'success');
                     setTimeout(() => window.location.reload(), 1500);
                 } else if (response['status'] == 300) {
-                    showNotification('Same database selected', 'warning');
+                    showNotification('Same database already selected', 'warning');
                 } else {
                     showNotification(`Database switch failed: ${response['msg']}`, 'error');
                 }
@@ -321,13 +500,19 @@ function initializeDropdowns() {
         });
     });
     
-    $("#dropdownDefaultButton").off('click').on('click', function() {
+    $("#dropdownDefaultButton").off('click').on('click', function(e) {
+        e.stopPropagation();
         $("#dropdown").toggleClass('hidden');
         $("#samedb").addClass('hidden');
     });
+    
+    // Close dropdown when clicking outside
+    $(document).off('click.dropdown').on('click.dropdown', function() {
+        $("#dropdown").addClass('hidden');
+    });
 }
 
-// Master checkbox
+// Master checkbox functionality
 function initializeMasterCheckbox() {
     const masterCheckbox = document.getElementById('masterCheckbox');
     if (masterCheckbox) {
@@ -335,26 +520,28 @@ function initializeMasterCheckbox() {
             const checkboxes = document.querySelectorAll('.checkbox');
             const tableBody = document.getElementById('tableBody');
             const rows = tableBody ? tableBody.getElementsByTagName('tr') : [];
+            let affectedCount = 0;
             
             for (let i = 0; i < checkboxes.length; i++) {
                 if (rows[i] && rows[i].style.display !== 'none') {
                     checkboxes[i].checked = masterCheckbox.checked;
+                    affectedCount++;
                 }
             }
             
-            const checkedCount = document.querySelectorAll('.checkbox:checked').length;
             showNotification(
-                `${masterCheckbox.checked ? 'Selected' : 'Deselected'} ${checkedCount} tables`, 
-                'info', 
+                `${masterCheckbox.checked ? '✓ Selected' : '✗ Deselected'} ${affectedCount} tables`, 
+                masterCheckbox.checked ? 'success' : 'info', 
                 2000
             );
         });
     }
 }
 
-// Keyboard shortcuts
+// Enhanced Keyboard shortcuts
 function initializeKeyboardShortcuts() {
     document.addEventListener('keydown', function(event) {
+        // Ctrl/Cmd + Enter: Generate or Execute
         if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
             event.preventDefault();
             if (!$("#request-query").hasClass('hidden')) {
@@ -364,14 +551,36 @@ function initializeKeyboardShortcuts() {
             }
         }
         
+        // Escape: Reset or Clear
         if (event.key === 'Escape') {
             if (!$("#reset-prompt").hasClass('hidden')) {
                 $("#reset-prompt").click();
+            } else if (!$("#myModal").hasClass('hidden')) {
+                $("#myModal").addClass('hidden');
             } else {
                 $("#clear-prompt").click();
             }
         }
+        
+        // Ctrl/Cmd + K: Focus on prompt
+        if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+            event.preventDefault();
+            $("#prompt").focus();
+        }
+        
+        // Ctrl/Cmd + Shift + V: Validate query
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'V') {
+            event.preventDefault();
+            $("#validate-query").click();
+        }
     });
+    
+    // Show keyboard shortcuts hint
+    console.log('Keyboard shortcuts enabled:');
+    console.log('- Ctrl/Cmd + Enter: Generate/Execute query');
+    console.log('- Escape: Reset/Clear/Close modal');
+    console.log('- Ctrl/Cmd + K: Focus prompt');
+    console.log('- Ctrl/Cmd + Shift + V: Validate query');
 }
 
 // Utility functions
@@ -386,24 +595,82 @@ function hideAllMessages() {
 function showLoadingState() {
     $('#modalContainer').removeClass('hidden');
     $(".functionclass").addClass('disabled');
-    $("#request-query").prop('disabled', true);
+    $("#request-query").prop('disabled', true).html('<span class="loading-spinner mr-2"></span><i class="fas fa-cogs mr-1"></i>Generating...');
 }
 
 function hideLoadingState() {
     $('#modalContainer').addClass('hidden');
     $(".functionclass").removeClass('disabled');
-    $("#request-query").prop('disabled', false);
+    $("#request-query").prop('disabled', false).html('<i class="fas fa-cogs mr-1"></i>Generate SQL');
 }
 
-// Auto-save functionality
+// Enhanced Auto-save functionality with debouncing
+let saveTimeout;
 $(document).on('input', '#prompt', function() {
-    localStorage.setItem('queryChakra_lastQuery', $(this).val());
+    const value = $(this).val();
+    
+    // Clear previous timeout
+    clearTimeout(saveTimeout);
+    
+    // Set new timeout for debounced save
+    saveTimeout = setTimeout(() => {
+        if (value.trim()) {
+            localStorage.setItem('queryChakra_lastQuery', value);
+        } else {
+            localStorage.removeItem('queryChakra_lastQuery');
+        }
+    }, 1000); // Save after 1 second of no typing
 });
 
-// Restore last query
+// Restore last query with user confirmation
 $(document).ready(function() {
     const lastQuery = localStorage.getItem('queryChakra_lastQuery');
     if (lastQuery && lastQuery.trim() && !$("#prompt").val().trim()) {
-        $("#prompt").val(lastQuery);
+        // Only restore if it's not just whitespace and looks like a meaningful query
+        if (lastQuery.length > 10 && !lastQuery.startsWith('Error') && !lastQuery.startsWith('I can only help')) {
+            $("#prompt").val(lastQuery);
+            showNotification('Previous query restored from local storage', 'info', 3000);
+        }
+    }
+});
+
+// Page visibility change handling to auto-save
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        // Page is being hidden - save current query
+        const currentQuery = $("#prompt").val();
+        if (currentQuery.trim()) {
+            localStorage.setItem('queryChakra_lastQuery', currentQuery);
+        }
+    }
+});
+
+// Enhanced error handling for AJAX requests
+$(document).ajaxError(function(event, jqXHR, ajaxSettings, thrownError) {
+    console.error('AJAX Error:', {
+        url: ajaxSettings.url,
+        status: jqXHR.status,
+        error: thrownError,
+        response: jqXHR.responseText
+    });
+    
+    // Hide loading states
+    hideLoadingState();
+    $("#validate-query").prop('disabled', false).html('<i class="fas fa-search mr-1"></i>Validate Query');
+    $("#execute-query").prop('disabled', false).html('<i class="fas fa-play mr-1"></i>Execute Query');
+    
+    // Show generic error if not already handled
+    if (!jqXHR.statusText || jqXHR.statusText === 'error') {
+        showNotification('Network error occurred. Please check your connection.', 'error', 5000);
+    }
+});
+
+// Page load performance monitoring
+window.addEventListener('load', function() {
+    const loadTime = performance.now();
+    console.log(`QueryChakra page loaded in ${Math.round(loadTime)}ms`);
+    
+    if (loadTime > 3000) {
+        showNotification('Page took longer than expected to load', 'warning', 3000);
     }
 });
