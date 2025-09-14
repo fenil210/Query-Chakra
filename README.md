@@ -314,13 +314,6 @@ python -m pytest tests/
 - [ ] API documentation with Swagger
 - [ ] Docker containerization
 
-### Version History
-
-- **v1.0.0**: Initial release with basic NL to SQL conversion
-- **v1.1.0**: Added conversation history and model selection
-- **v1.2.0**: Enhanced UI/UX with modern design
-- **v1.3.0**: Added deployment support and cloud integration
-
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
