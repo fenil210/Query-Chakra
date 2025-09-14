@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import sqlalchemy
 from sqlalchemy import create_engine, text 
 import json
+from urllib.parse import quote_plus
 
 nv_path = os.path.join(os.path.dirname(__file__), 'config', '.env')
 load_dotenv(dotenv_path=nv_path)
@@ -12,12 +13,13 @@ load_dotenv(dotenv_path=nv_path)
 class dbactivities:
     def __init__(self):
         self.host = os.environ['HOST'] 
-        self.port = os.environ['PORT']
+        self.db_port = os.environ['DB_PORT']
         self.database = os.environ['DB']
         self.username = os.environ['USER']
         self.password = os.environ['PASSWORD']
         try:
-            connection_string = f'mysql+pymysql://{self.username}:{self.password}@{self.host}/{self.database}'
+            encoded_password = quote_plus(self.password)
+            connection_string = f'mysql+pymysql://{self.username}:{encoded_password}@{self.host}/{self.database}'
 
             self.engine = create_engine(connection_string)
             print(f'Connection String :: {connection_string}')

@@ -1,167 +1,483 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>Llama SQL Generator</title>
+        <title>QueryChakra - Natural Language to SQL</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script src="https://cdn.tailwindcss.com"></script>
         <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style/index.css') }}">
         <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style/scrollbar.css') }}">
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
         <link rel="stylesheet" href="https://demos.creative-tim.com/notus-js/assets/vendor/@fortawesome/fontawesome-free/css/all.min.css">
+        <style>
+            .model-badge {
+                @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+            }
+            .ollama-badge {
+                @apply bg-blue-100 text-blue-800;
+            }
+            .groq-badge {
+                @apply bg-purple-100 text-purple-800;
+            }
+            .loading-spinner {
+                @apply animate-spin rounded-full h-4 w-4 border-b-2 border-white;
+            }
+            .notification {
+                @apply fixed top-4 right-4 p-4 rounded-lg shadow-lg transition-all duration-300 transform;
+            }
+            .notification.success {
+                @apply bg-green-500 text-white;
+            }
+            .notification.error {
+                @apply bg-red-500 text-white;
+            }
+            .notification.warning {
+                @apply bg-yellow-500 text-white;
+            }
+            
+            /* Enhanced Chat History Styles */
+            .chat-container {
+                max-height: 400px;
+                overflow-y: auto;
+                padding: 1rem;
+                background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                border-radius: 0.75rem;
+                border: 1px solid #e2e8f0;
+            }
+            
+            .conversation-item {
+                margin-bottom: 1.5rem;
+                animation: fadeInUp 0.3s ease-out;
+                background: white;
+                border-radius: 0.75rem;
+                padding: 1rem;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                border-left: 4px solid #3b82f6;
+            }
+            
+            .conversation-header {
+                display: flex;
+                justify-content: between;
+                align-items: center;
+                margin-bottom: 0.75rem;
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid #f1f5f9;
+            }
+            
+            .conversation-meta {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                align-items: center;
+                font-size: 0.75rem;
+                color: #64748b;
+            }
+            
+            .user-query {
+                background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+                padding: 0.75rem 1rem;
+                border-radius: 0.5rem;
+                margin-bottom: 0.75rem;
+                border-left: 3px solid #3b82f6;
+                font-weight: 500;
+                color: #1e40af;
+            }
+            
+            .sql-response {
+                background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+                padding: 0.75rem 1rem;
+                border-radius: 0.5rem;
+                border-left: 3px solid #16a34a;
+                font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+                font-size: 0.875rem;
+                line-height: 1.5;
+                color: #166534;
+                word-break: break-all;
+                white-space: pre-wrap;
+            }
+            
+            .sql-response.error {
+                background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+                border-left-color: #dc2626;
+                color: #991b1b;
+            }
+            
+            .status-badge {
+                padding: 0.25rem 0.5rem;
+                border-radius: 9999px;
+                font-size: 0.6875rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.025em;
+            }
+            
+            .status-generated { @apply bg-blue-100 text-blue-800; }
+            .status-executed { @apply bg-green-100 text-green-800; }
+            .status-error { @apply bg-red-100 text-red-800; }
+            
+            .conversation-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 0.5rem;
+                margin-top: 0.75rem;
+                padding-top: 0.5rem;
+                border-top: 1px solid #f1f5f9;
+            }
+            
+            .action-btn {
+                padding: 0.25rem 0.5rem;
+                border-radius: 0.375rem;
+                font-size: 0.75rem;
+                cursor: pointer;
+                transition: all 0.2s;
+                border: 1px solid transparent;
+            }
+            
+            .action-btn:hover {
+                transform: translateY(-1px);
+            }
+            
+            .btn-reuse { @apply bg-blue-50 text-blue-600 hover:bg-blue-100; }
+            .btn-delete { @apply bg-red-50 text-red-600 hover:bg-red-100; }
+            .btn-copy { @apply bg-gray-50 text-gray-600 hover:bg-gray-100; }
+            
+            @keyframes fadeInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            .history-controls {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1rem;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+            
+            .history-stats {
+                font-size: 0.875rem;
+                color: #64748b;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            
+            .history-actions {
+                display: flex;
+                gap: 0.5rem;
+                flex-wrap: wrap;
+            }
+            
+            .empty-history {
+                text-align: center;
+                padding: 3rem 1rem;
+                color: #94a3b8;
+            }
+            
+            .empty-history i {
+                font-size: 3rem;
+                margin-bottom: 1rem;
+                opacity: 0.5;
+            }
+        </style>
     </head>
     <body>
         {% include "navbar.html" %}
+        
+        <!-- Notification container -->
+        <div id="notification-container"></div>
+        
         <div id="app">
             <div class="grid gap-4 grid-cols-8">
                 <div class="col-start-2 col-end-8"><br><br>
+                    <!-- Model Selection Section -->
+                    <div class="mb-4 p-4 bg-white rounded-lg shadow-sm border border-gray-200">
+                        <label class="block text-sm font-medium text-gray-800 mb-2">
+                            Select AI Model Provider & Model
+                        </label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-gray-700 mb-1">Provider</label>
+                                <select id="model-provider" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 text-sm bg-white text-gray-800">
+                                    <option value="">Select Provider</option>
+                                    {% if available_models.groq %}
+                                    <option value="groq">Groq (Cloud)</option>
+                                    {% endif %}
+                                    {% if available_models.ollama %}
+                                    <option value="ollama">Ollama (Local)</option>
+                                    {% endif %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-700 mb-1">Model</label>
+                                <select id="model-name" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 text-sm bg-white text-gray-800" disabled>
+                                    <option value="">Select Model</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="model-info" class="mt-2 text-xs text-gray-600 hidden">
+                            <span id="model-badge" class="model-badge"></span>
+                            <span id="model-description" class="ml-2"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Query Input Section -->
                     <label class="text-gray-700 text-sm font-bold mb-2 border border-transparent" for="textarea">
-                      &nbsp;&nbsp;<span class="text-xs font-medium"><center>SQL Server Query Generator</center></span>
+                      &nbsp;&nbsp;<span class="text-xs font-medium"><center>Natural Language Query</center></span>
                     </label>
-                    <textarea id="prompt" class="w-full p-1 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 text-left text-sm" 
-                    placeholder="&nbsp;&nbsp;&nbsp;search your data" style="font-size: 20px !important; font-weight: bold;" rows="4">
-                    </textarea>
-                    <span class="hidden warningtext text-red-600 text-xs font-semibold">Enter a valid text</span>
-                    <span class="hidden warningcheckbox text-red-600 text-xs font-semibold">Select suitable tables to proceed</span>
-                    <span class="hidden successtext text-green-500 text-xs font-semibold">The query was generated in <u id="time-taken" class="text-green-600"></u> minutes</span>
-                    <div class="functionclass flex items-center justify-between p-2">
-                        <button id="request-query" class="flex bg-green-800 text-white px-1 py-1 rounded-md text-xs hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-blue-300">
-                            <img width="14" height="14" src="https://img.icons8.com/arcade/64/process.png" alt="process"/>
-                            Generate
+                    <textarea id="prompt" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:border-blue-500 text-left text-sm transition-all duration-200" 
+                    placeholder="Ask questions about your database data... (e.g., 'Show me all customers who made purchases last month')" 
+                    style="font-size: 16px !important; min-height: 100px;" rows="4"></textarea>
+                    
+                    <!-- Warning/Success Messages -->
+                    <div class="mt-2 space-y-1">
+                        <span class="hidden warningtext text-red-600 text-xs font-semibold flex items-center">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            Enter a valid query
+                        </span>
+                        <span class="hidden warningcheckbox text-red-600 text-xs font-semibold flex items-center">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            Select suitable tables to proceed
+                        </span>
+                        <span class="hidden warningmodel text-red-600 text-xs font-semibold flex items-center">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            Please select a model provider and model
+                        </span>
+                        <span class="hidden successtext text-green-500 text-xs font-semibold flex items-center">
+                            <i class="fas fa-check-circle mr-1"></i>
+                            Query generated in <u id="time-taken" class="text-green-600"></u> minutes using <span id="used-model"></span>
+                        </span>
+                        <span class="hidden validationtext text-yellow-600 text-xs font-semibold flex items-center">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            <span id="validation-message"></span>
+                        </span>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="functionclass flex items-center justify-between p-3 mt-3">
+                        <button id="validate-query" class="flex items-center bg-yellow-600 text-white px-3 py-2 rounded-md text-xs hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-300 transition-all duration-200">
+                            <i class="fas fa-search mr-1"></i>
+                            Validate Query
                         </button>
-                        <button id="execute-query" class=" hidden flex bg-emerald-500 text-white px-1 py-1 rounded-md text-xs hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-blue-300">
-                            <img width="14" height="14" src="https://img.icons8.com/color/48/ok--v1.png" alt="ok--v1"/>
-                            Execute
+                        <button id="request-query" class="flex items-center bg-green-800 text-white px-3 py-2 rounded-md text-xs hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all duration-200">
+                            <span class="loading-spinner hidden mr-2"></span>
+                            <i class="fas fa-cogs mr-1 generate-icon"></i>
+                            Generate SQL
                         </button>
-                        <button class="flex text-xs bg-sky-600 text-white rounded-md px-1 py-1 text-base font-medium hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-green-300" id="openModalButton">
-                            <img width="14" height="14" src="https://img.icons8.com/fluency/48/database--v1.png" alt="database--v1"/>
-                            Connection
+                        <button id="execute-query" class="hidden flex items-center bg-emerald-500 text-white px-3 py-2 rounded-md text-xs hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all duration-200">
+                            <i class="fas fa-play mr-1"></i>
+                            Execute Query
                         </button>
-                        <button id="clear-prompt" class="flex bg-amber-500 text-white px-1 py-1 rounded-md text-xs hover:bg-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-300">
-                            <img width="14" height="14" src="https://img.icons8.com/color/48/broom.png" alt="broom"/>
+                        <button class="flex items-center text-xs bg-sky-600 text-white rounded-md px-3 py-2 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-green-300 transition-all duration-200" id="openModalButton">
+                            <i class="fas fa-database mr-1"></i>
+                            Connection Info
+                        </button>
+                        <button id="clear-prompt" class="flex items-center bg-amber-500 text-white px-3 py-2 rounded-md text-xs hover:bg-orange-500 focus:outline-none focus:ring-2 focus:ring-amber-300 transition-all duration-200">
+                            <i class="fas fa-eraser mr-1"></i>
                             Clear
                         </button>
-                        <button id="reset-prompt" class="hidden flex bg-red-800 text-white px-1 py-1 rounded-md text-xs hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-amber-300">
-                            <img width="14" height="14" src="https://img.icons8.com/fluency/48/synchronize.png" alt="synchronize"/>
+                        <button id="reset-prompt" class="hidden flex items-center bg-red-800 text-white px-3 py-2 rounded-md text-xs hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-amber-300 transition-all duration-200">
+                            <i class="fas fa-sync mr-1"></i>
                             Reset
                         </button>
                     </div>                      
                 </div>
+                
+                <!-- Database Schema Section -->
                 <div class="flex col-start-2 col-end-8 justify-between p-4 w-full">
-                    <input id="filterInput" class="font-semibold text-xs text-slate-600 underline decoration-slate-700" 
+                    <input id="filterInput" class="font-semibold text-xs text-slate-600 underline decoration-slate-700 p-2 rounded border" 
                     type="text" placeholder="Search schema and tables">
-                    <!-- dropdown DB -->
+                    
+                    <!-- Database Dropdown -->
                     <span class="hidden text-red-600 text-xs" id="samedb">select a different database to change</span>
-                    <button id="dropdownDefaultButton" data-dropdown-toggle="dropdown" class="text-white focus:outline-none rounded-lg text-sm 
-                    px-1 py-1 text-center inline-flex items-center" 
-                    type="button">{{ db_data['Database'] }}
+                    <button id="dropdownDefaultButton" data-dropdown-toggle="dropdown" class="text-white bg-blue-600 hover:bg-blue-700 focus:outline-none rounded-lg text-sm 
+                    px-3 py-2 text-center inline-flex items-center transition-all duration-200" 
+                    type="button">
+                        <i class="fas fa-database mr-2"></i>
+                        {{ db_data['Database'] }}
+                        <i class="fas fa-chevron-down ml-2"></i>
                     </button>
+                    
                     <!-- Dropdown menu -->
                     <div id="dropdown" class="z-10 hidden bg-white divide-y divide-gray-100 rounded-lg shadow w-44 dark:bg-black-700">
-                        <ul id="dropdown-group" class="py-2 text-sm text-gray-700 overflow-y-auto" aria-labelledby="dropdownDefaultButton">
+                        <ul id="dropdown-group" class="py-2 text-sm text-gray-700 overflow-y-auto max-h-48" aria-labelledby="dropdownDefaultButton">
                             {% for key in dbs %}
                             <li>
-                                <a href="#" class="block p-1 hover:bg-gray-100"> {{ key }}</a>
+                                <a href="#" class="block p-2 hover:bg-gray-100 transition-colors duration-150"> 
+                                    <i class="fas fa-database mr-2 text-gray-400"></i>
+                                    {{ key }}
+                                </a>
                             </li>
                             {% endfor %}    
                         </ul>
                     </div>
-                    <!-- dropdown DB -->
                 </div>
+                
+                <!-- Schema Table -->
                 <div class="col-start-2 col-end-8">
-                        <table id="database_schema" class="text-xs table-fixed text-sm w-full border-collapse border border-slate-100">
-                            <caption class="caption-top">
-                                Please select appropriate tables for better and quicker results
-                            </caption>
-                        <thead class="text-base">
-                            <th class="w-1/4 p-1 text-center border border-amber-100">Table</th>
-                            <th class="w-1/6 p-1 text-center border border-amber-100">Schema</th>
-                            <th class="w-1/3 p-1 text-center border border-amber-100">Columns</th>
-                            <th class="w-1/3 p-1 text-center border border-amber-100">Datatypes</th>
-                            <th class="p-1 text-center justify-center border border-amber-100">
-                                <input id="masterCheckbox" type="checkbox" class="form-checkbox ml-auto text-indigo-600" checked> 
-                            </th>
+                    <table id="database_schema" class="text-xs table-fixed text-sm w-full border-collapse border border-slate-200 bg-white rounded-lg overflow-hidden shadow-sm">
+                        <caption class="caption-top py-2 text-sm text-gray-600">
+                            Select appropriate tables for better and more accurate results
+                        </caption>
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="w-1/4 p-3 text-center border border-gray-200 font-semibold">Table</th>
+                                <th class="w-1/6 p-3 text-center border border-gray-200 font-semibold">Schema</th>
+                                <th class="w-1/3 p-3 text-center border border-gray-200 font-semibold">Columns</th>
+                                <th class="w-1/3 p-3 text-center border border-gray-200 font-semibold">Data Types</th>
+                                <th class="p-3 text-center justify-center border border-gray-200 font-semibold">
+                                    <input id="masterCheckbox" type="checkbox" class="form-checkbox text-indigo-600 rounded" checked> 
+                                    <label class="ml-1 text-xs">All</label>
+                                </th>
+                            </tr>
                         </thead>
-                        <tbody id="tableBody">
-                                {% for keys,values in json_data.items() %}
-                                    <tr>
-                                        <td class="p-2 max-h-10 text-center overflow-y-auto border border-amber-100">{{ keys }}</td>
-                                        <td class="p-2 max-h-10 text-center overflow-y-auto border border-amber-100">{{values[0]['schema']}}</td>
-                                        <td class="p-2 max-h-10 overflow-y-auto border border-amber-100">{{values[0]['name']}}</td>
-                                        <td class="p-2 max-h-10 overflow-y-auto border border-amber-100">{{values[0]['dtypes']}}</td>
-                                        <td class="p-2 text-center border border-amber-100">
-                                            <label>
-                                                <input type="checkbox" class="checkbox" checked>
-                                            </label>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                            </tbody>
-                        </table>
+                        <tbody id="tableBody" class="divide-y divide-gray-200">
+                            {% for keys,values in json_data.items() %}
+                                <tr class="hover:bg-gray-50 transition-colors duration-150">
+                                    <td class="p-3 max-h-16 text-center overflow-y-auto border border-gray-200 font-medium">{{ keys }}</td>
+                                    <td class="p-3 max-h-16 text-center overflow-y-auto border border-gray-200">{{values[0]['schema']}}</td>
+                                    <td class="p-3 max-h-16 overflow-y-auto border border-gray-200 text-xs">{{values[0]['name']}}</td>
+                                    <td class="p-3 max-h-16 overflow-y-auto border border-gray-200 text-xs text-gray-600">{{values[0]['dtypes']}}</td>
+                                    <td class="p-3 text-center border border-gray-200">
+                                        <label class="inline-flex items-center">
+                                            <input type="checkbox" class="checkbox form-checkbox text-indigo-600 rounded" checked>
+                                        </label>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
+                
+                <!-- Enhanced Chat History Section -->
+                {% if chat_history %}
+                <div class="col-start-2 col-end-8 mt-6">
+                    <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                        <div class="history-controls p-4 border-b border-gray-200">
+                            <div class="history-stats">
+                                <i class="fas fa-history text-blue-500"></i>
+                                <span class="font-semibold text-gray-700">Conversation History</span>
+                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                                    {{ chat_history|length }} conversations
+                                </span>
+                            </div>
+                            <div class="history-actions">
+                                <button id="export-history" class="action-btn btn-copy">
+                                    <i class="fas fa-download mr-1"></i>Export
+                                </button>
+                                <button id="clear-history" class="action-btn btn-delete">
+                                    <i class="fas fa-trash mr-1"></i>Clear All
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="chat-container" id="chat-history">
+                            {% for conversation in chat_history[-10:] %}
+                            <div class="conversation-item" data-conversation-id="{{ conversation.id }}">
+                                <div class="conversation-header">
+                                    <div class="conversation-meta">
+                                        <i class="fas fa-clock mr-1"></i>
+                                        <span class="timestamp">{{ conversation.timestamp | replace('T', ' ') | replace('.000000', '') | replace('-', '/') }}</span>
+                                        <span class="status-badge status-{{ conversation.status }}">{{ conversation.status }}</span>
+                                        <span class="model-used">{{ conversation.model_used }}</span>
+                                        <span class="time-taken">{{ conversation.time_taken }}min</span>
+                                        <span class="database-name">{{ conversation.database }}</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="user-query">
+                                    <i class="fas fa-user mr-2"></i>
+                                    <strong>Question:</strong> {{ conversation.user_query }}
+                                </div>
+                                
+                                <div class="sql-response {% if conversation.status == 'error' %}error{% endif %}">
+                                    <i class="fas fa-code mr-2"></i>
+                                    <strong>{% if conversation.status == 'error' %}Error:{% else %}SQL:{% endif %}</strong>
+                                    {{ conversation.sql_query }}
+                                </div>
+                                
+                                {% if conversation.get('error_message') %}
+                                <div class="sql-response error">
+                                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                                    <strong>Execution Error:</strong> {{ conversation.error_message }}
+                                </div>
+                                {% endif %}
+                                
+                                <div class="conversation-actions">
+                                    {% if conversation.status != 'error' %}
+                                    <button class="action-btn btn-reuse" onclick="reuseQuery('{{ conversation.sql_query | replace("'", "\\'") }}')">
+                                        <i class="fas fa-redo mr-1"></i>Reuse
+                                    </button>
+                                    <button class="action-btn btn-copy" onclick="copyToClipboard('{{ conversation.sql_query | replace("'", "\\'") }}')">
+                                        <i class="fas fa-copy mr-1"></i>Copy
+                                    </button>
+                                    {% endif %}
+                                    <button class="action-btn btn-delete" onclick="deleteConversation({{ conversation.id }})">
+                                        <i class="fas fa-trash mr-1"></i>Delete
+                                    </button>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="col-start-2 col-end-8 mt-6">
+                    <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                        <div class="empty-history">
+                            <i class="fas fa-comments"></i>
+                            <h3 class="text-lg font-medium text-gray-600 mb-2">No conversations yet</h3>
+                            <p class="text-sm text-gray-500">Start by asking questions about your database to see your conversation history here.</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
+        
+        <!-- Connection Info Modal -->
         <div id="overlay" class="overlay"></div>
-        <!-- MODAL -->
         <div id="myModal" class="hidden fixed inset-0 flex items-center justify-center z-50">
-            <div class="p-4 rounded-md shadow-lg bg-lime-200">
-                <h2 class="text-md font-semibold mb-2">Connection Parameters</h2>
-                <div class="text-xs">
-                    <p><b>Database : </b><a class="underline decoration-indigo-400/80">{{ db_data['Database'] }}</a></p>
-                    <p><b>User : </b><a class="underline decoration-indigo-500/80">{{ db_data['user'] }}</a></p>
-                    <p><b>Host : </b><a class="underline decoration-indigo-600/80">{{ db_data['host'] }}</a></p>
-                    <p><b>Port : </b><a class="underline decoration-indigo-700/80">{{ db_data['port'] }}</a></p>
+            <div class="p-6 rounded-lg shadow-lg bg-white max-w-md w-full mx-4">
+                <h2 class="text-lg font-semibold mb-4 text-gray-800">Database Connection</h2>
+                <div class="text-sm space-y-2">
+                    <p><span class="font-medium">Database:</span> <span class="text-blue-600">{{ db_data['Database'] }}</span></p>
+                    <p><span class="font-medium">User:</span> <span class="text-blue-600">{{ db_data['user'] }}</span></p>
+                    <p><span class="font-medium">Host:</span> <span class="text-blue-600">{{ db_data['host'] }}</span></p>
+                    <p><span class="font-medium">Port:</span> <span class="text-blue-600">{{ db_data['db_port'] }}</span></p>
                 </div>
-                <button id="closeModalButton" class="text-xs mt-3 bg-green-700 text-slate-100 hover:bg-lime-400 hover:text-slate-800 hover:font-semibold px-1 py-1 rounded-md">
+                <button id="closeModalButton" class="mt-4 bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-md text-sm transition-all duration-200">
                     Close
                 </button>
             </div>
         </div>
-        <!-- Page bufferer -->
+        
+        <!-- Loading Modal -->
         <div id="modalContainer" class="hidden modal-container">
-            <div class="modal-content p-6 rounded shadow-md">
-                <svg viewBox="0 0 100 100">
-                    <g fill="#000" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="6">
-                        <!-- left line -->
-                        <!-- left line -->
-                        <path d="M 21 40 V 59">
-                            <animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0 21 59; 180 21 59"
-                      dur="2s" repeatCount="indefinite" />
-                        </path>
-                        <!-- right line -->
-                        <path d="M 79 40 V 59">
-                            <animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0 79 59; -180 79 59"
-                      dur="2s" repeatCount="indefinite" />
-                        </path>
-                        <!-- top line -->
-                        <path d="M 50 21 V 40">
-                            <animate attributeName="d" values="M 50 21 V 40; M 50 59 V 40" dur="2s" repeatCount="indefinite" />
-                        </path>
-                        <!-- btm line -->
-                        <path d="M 50 60 V 79">
-                            <animate attributeName="d" values="M 50 60 V 79; M 50 98 V 79" dur="2s" repeatCount="indefinite" />
-                        </path>
-                        <!-- top box -->
-                        <path d="M 50 21 L 79 40 L 50 60 L 21 40 Z">
-                        <animate attributeName="stroke" values="rgba(255,255,255,1); rgba(100,100,100,0)" dur="2s" repeatCount="indefinite" />
-                        </path>
-                        <!-- mid box -->
-                        <path d="M 50 40 L 79 59 L 50 79 L 21 59 Z"/>
-                        <!-- btm box -->
-                        <path d="M 50 59 L 79 78 L 50 98 L 21 78 Z">
-                        <animate attributeName="stroke" values="rgba(100,100,100,0); rgba(255,255,255,1)" dur="2s" repeatCount="indefinite" />
-                        </path>
-                        <animateTransform attributeName="transform" attributeType="XML" type="translate" values="0 0; 0 -19" dur="2s" repeatCount="indefinite" />
-                    </g>
-                </svg>
+            <div class="modal-content p-6 rounded shadow-md bg-white">
+                <div class="flex items-center justify-center">
+                    <div class="loading-spinner border-blue-600 mr-3"></div>
+                    <span class="text-sm text-gray-700">Generating SQL query...</span>
+                </div>
             </div>
-          </div>
-          <div class="chat-history">
-            <ul>
-                {% for message in chat_history %}
-                <li>{{ message }}</li>
-                {% endfor %}
-            </ul>
         </div>
+        
+        <!-- Hidden model data for JavaScript -->
+        <script type="text/javascript">
+            // Pass model data safely to JavaScript
+            window.availableModels = {
+                'ollama': {{ available_models.ollama | tojson }},
+                'groq': {{ available_models.groq | tojson }}
+            };
+            console.log('Model data loaded:', window.availableModels);
+        </script>
+        
         {% include "footer.html" %}
         <script src="{{ url_for('static', filename='script/clock.js') }}"></script>
         <script src="{{ url_for('static', filename='script/table-filter.js') }}"></script>

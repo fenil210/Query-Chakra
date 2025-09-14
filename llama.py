@@ -1,124 +1,233 @@
-# from ctransformers import AutoModelForCausalLM
-# from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
-# import time
-# import re
-# import os
-# from dotenv import load_dotenv
-
-# nv_path = os.path.join(os.path.dirname(__file__), 'config', '.env')
-# load_dotenv(dotenv_path=nv_path)
-
-# class llm:
-#     def __init__(self,model='',version=''):
-#         self.model = model
-#         self.version = version 
-#         self.llm = ''
-#         self.template = '''[INST] You are a professional SQL developer. Understand the question asked and return the most suitable query
-#                             supported by SQLSERVER using the table : ""{schema}"". Always write sql server standard queries.
-#                             Always wrap your code answer using ```. question: {prompt} [/INST]'''
-        
-#     def load_model(self):
-#         try:
-#             print(self.model, self.version) 
-#             if self.model and self.version:
-#                 self.llm = AutoModelForCausalLM.from_pretrained("chavinlo/alpaca-native", device_map='auto', load_in_8bit=True)
-
-#             elif self.model:
-#                 self.llm = AutoModelForCausalLM.from_pretrained("chavinlo/alpaca-native", device_map='auto', load_in_8bit=True)
-#             else:
-#                 raise Exception("You don't have a local model")
-#             return llm_model
-#         except Exception as e:
-#             try:
-#                 if self.model and self.version:
-#                     print(e)
-#                     llm_model = AutoModelForCausalLM.from_pretrained("chavinlo/alpaca-native", device_map='auto', load_in_8bit=True)
-#                 elif self.model:
-#                     llm_model = AutoModelForCausalLM.from_pretrained("chavinlo/alpaca-native", device_map='auto', load_in_8bit=True)
-#                 self.llm = llm_model
-#             except Exception as e:
-#                 return f'Unable to find a local model. When tried to install, below error occurred\n{e}'
-            
-
-#     def response_capturer(self,schema,prompt):
-#         try:
-#             start_time=time.time()
-#             template = self.template.replace("{schema}",schema).replace("{prompt}",prompt)
-#             if self.llm:
-#                 model = self.llm
-#                 print(model)
-
-#             else:
-#                  model = self.load_model()
-#                  print(model)
-#                  if type(model)==str:
-#                      raise Exception(model) 
-#             sql_query = model(template)
-#             try:
-#                 sql_query = re.findall(r'```([\s\S]*?)```',sql_query, re.DOTALL)[0]
-#             except:
-#                 pass
-#             end_time = time.time() 
-#             return sql_query, (end_time-start_time)
-#         except Exception as e:
-#             return f'Error in loading the response\n {e}',0
 import os
 import time 
 from dotenv import load_dotenv
 import ollama
-
-# class LLM:
-#     def __init__(self):
-#         # Assuming your ollama configuration does not need explicit model loading
-#         # as shown in your second code snippet.
-#         self.template = '''[INST] You are a professional SQL developer. Understand the question asked and return the most suitable query
-#                              supported by SQLSERVER using the table : ""{schema}"". Always write sql server standard queries.
-#                              Always wrap your code answer using ```. question: {prompt} [/INST]'''
-#         nv_path = os.path.join(os.path.dirname(__file__), 'config', '.env')
-#         load_dotenv(dotenv_path=nv_path)
-
-#     def generate_query(self, schema, query):
-#         template = self.template.replace("{schema}",schema).replace("{prompt}",query)
-#         start_time=time.time()
-#         stream = ollama.chat(
-#             model='sql_generator_codellama',
-#             messages=[{'role': 'user', 'content': template}],
-#             stream=True
-#         )
-#         response = ""
-#         for chunk in stream:
-#             response += chunk['message']['content']
-#         end_time = time.time() 
-#         return response, abs(start_time-end_time) 
-
+import requests
+from groq import Groq
+import re
 
 class LLM:
     def __init__(self):
-        self.template = '''[INST] Given an input question:
-1. In the first line, provide the user’s natural language query input as the output
+        # Enhanced prompt with strict DB focus and anti-hallucination measures
+        self.template = '''[INST] You are a specialized SQL query generator with STRICT limitations:
 
-2. Analyze the user's input and the provided database schema to generate a corresponding SQL query. Make sure to construct the query considering the best practices for database querying and security, especially focusing on preventing SQL injection risks.
+CRITICAL RULES:
+1. You ONLY generate SQL queries for database operations
+2. You MUST NOT answer any non-database related questions
+3. If asked about anything other than SQL/database operations, respond with: "I can only help with SQL database queries."
+4. NEVER provide general knowledge, programming advice, or personal opinions
 
-3. If the user's input is ambiguous or if you cannot generate a precise SQL query with high confidence, prompt the user with specific questions to clarify their intent. Ensure these questions are directly related to refining the user's input for a more accurate SQL translation.
+TASK: Given the user's natural language input and database schema, generate a precise SQL Server query.
 
-4. Produce the SQL query as the output. Do not provide any explanations or additional information beyond the SQL query itself. If further input from the user is needed, only output the necessary clarifying questions. 
-You are a professional SQL developer. Understand the question asked and return only relevent SQLSERVER answer using the table : "{schema}". Always write sql server standard queries.
-Always wrap your code answer using ```. question: {prompt}.  [/INST]'''
+USER INPUT: {prompt}
+
+DATABASE SCHEMA: {schema}
+
+REQUIREMENTS:
+- Use SQL Server syntax ONLY
+- Reference ONLY the provided tables and columns
+- If the user's request cannot be translated to a valid SQL query using the given schema, ask for clarification
+- If the user asks about topics outside of database querying, decline politely
+- Always wrap your SQL code in ``` markers
+- Provide ONLY the SQL query, no explanations unless explicitly requested
+
+RESPOND WITH ONLY:
+1. The SQL query in ``` blocks
+2. OR clarification questions about the database query
+3. OR the decline message for non-DB topics
+
+[/INST]'''
+        
         nv_path = os.path.join(os.path.dirname(__file__), 'config', '.env')
         load_dotenv(dotenv_path=nv_path)
+        
+        # Model configurations
+        self.models = {
+            'ollama': [
+                # 'codellama:7b-instruct',
+                # 'llama3.1:8b',
+                # 'sqlcoder:7b'
+                # 'qwen3:1.7b'
+                'gemma3:1b'
+            ],
+            'groq': [
+                'llama-3.1-8b-instant',
+                'openai/gpt-oss-20b',
+                'llama-3.3-70b-versatile'
+            ]
+        }
+        
+        # Initialize Groq client
+        self.groq_api_key = os.environ.get('GROQ_API_KEY')
+        if self.groq_api_key:
+            self.groq_client = Groq(api_key=self.groq_api_key)
+        else:
+            self.groq_client = None
 
-    def generate_query(self, schema, query, history):
-        template = self.template.replace("{schema}", schema).replace("{prompt}", query)
+    def get_available_models(self):
+        """Return available models for both providers"""
+        available = {'ollama': [], 'groq': []}
+        
+        # Check Ollama models
+        try:
+            ollama_response = ollama.list()
+            print(f"Debug - Ollama response: {ollama_response}")  # Debug log
+            
+            if 'models' in ollama_response:
+                available_ollama = []
+                for model in ollama_response['models']:
+                    # Handle different possible key names
+                    model_name = model.get('name') or model.get('model') or model.get('id', '')
+                    if model_name:
+                        available_ollama.append(model_name)
+                
+                # Filter to only include models we support
+                available['ollama'] = [model for model in self.models['ollama'] 
+                                     if any(model.split(':')[0] in avail for avail in available_ollama)]
+            else:
+                available['ollama'] = []
+                
+        except Exception as e:
+            print(f"Ollama not available: {e}")
+            available['ollama'] = []
+        
+        # Check Groq availability
+        if self.groq_client:
+            available['groq'] = self.models['groq']
+        else:
+            available['groq'] = []
+            
+        print(f"Debug - Available models: {available}")  # Debug log
+        return available
+
+    def validate_query_intent(self, query):
+        """Validate if the query is database-related"""
+        db_keywords = [
+            'select', 'insert', 'update', 'delete', 'table', 'database', 'query', 'sql',
+            'where', 'join', 'group by', 'order by', 'count', 'sum', 'avg', 'max', 'min',
+            'show me', 'find', 'get', 'retrieve', 'data', 'records', 'rows', 'columns'
+        ]
+        
+        non_db_patterns = [
+            'weather', 'news', 'recipe', 'movie', 'music', 'sports', 'politics',
+            'health', 'travel', 'shopping', 'gaming', 'entertainment',
+            'what is', 'who is', 'when did', 'how to', 'tell me about'
+        ]
+        
+        query_lower = query.lower()
+        
+        # Check for obvious non-DB patterns
+        for pattern in non_db_patterns:
+            if pattern in query_lower and not any(keyword in query_lower for keyword in db_keywords):
+                return False, "I can only help with SQL database queries. Please ask about your database data."
+        
+        return True, None
+
+    def generate_query(self, schema, query, history, model_provider, model_name):
+        """Generate SQL query using specified model and provider"""
         start_time = time.time()
-        messages = [{'role': 'system', 'content': history}] if history else []
+        
+        # Validate query intent first
+        is_valid, error_msg = self.validate_query_intent(query)
+        if not is_valid:
+            return error_msg, abs(time.time() - start_time)
+        
+        try:
+            template = self.template.replace("{schema}", schema).replace("{prompt}", query)
+            
+            if model_provider == 'ollama':
+                return self._generate_with_ollama(template, history, model_name, start_time)
+            elif model_provider == 'groq':
+                return self._generate_with_groq(template, history, model_name, start_time)
+            else:
+                return "Invalid model provider specified.", abs(time.time() - start_time)
+                
+        except Exception as e:
+            return f"Error generating query: {str(e)}", abs(time.time() - start_time)
+
+    def _generate_with_ollama(self, template, history, model_name, start_time):
+        """Generate query using Ollama"""
+        messages = []
+        if history:
+            messages.append({'role': 'system', 'content': history})
         messages.append({'role': 'user', 'content': template})
-        stream = ollama.chat(
-            model='sql_generator_codellama',
-            messages=messages,
-            stream=True
-        )
-        response = ""
-        for chunk in stream:
-            response += chunk['message']['content']
-        end_time = time.time()
-        return response, abs(start_time - end_time)
+        
+        try:
+            stream = ollama.chat(
+                model=model_name,
+                messages=messages,
+                stream=True,
+                options={
+                    'temperature': 0.1,  # Low temperature for consistent SQL generation
+                    'top_p': 0.9,
+                    'stop': ['[INST]', '[/INST]']  # Stop tokens to prevent rambling
+                }
+            )
+            
+            response = ""
+            for chunk in stream:
+                response += chunk['message']['content']
+                
+            # Post-process response to extract SQL
+            response = self._post_process_response(response)
+            
+            end_time = time.time()
+            return response, abs(start_time - end_time)
+            
+        except Exception as e:
+            return f"Ollama error: {str(e)}", abs(time.time() - start_time)
+
+    def _generate_with_groq(self, template, history, model_name, start_time):
+        """Generate query using Groq"""
+        if not self.groq_client:
+            return "Groq API key not configured.", abs(time.time() - start_time)
+        
+        try:
+            messages = []
+            if history:
+                messages.append({"role": "system", "content": history})
+            messages.append({"role": "user", "content": template})
+            
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=messages,
+                model=model_name,
+                temperature=0.1,  # Low temperature for consistent SQL generation
+                max_tokens=1024,
+                top_p=0.9,
+                stop=['[INST]', '[/INST]']  # Stop tokens
+            )
+            
+            response = chat_completion.choices[0].message.content
+            response = self._post_process_response(response)
+            
+            end_time = time.time()
+            return response, abs(start_time - end_time)
+            
+        except Exception as e:
+            return f"Groq error: {str(e)}", abs(time.time() - start_time)
+
+    def _post_process_response(self, response):
+        """Post-process the response to clean up and validate"""
+        # Check if response is a decline for non-DB topics
+        decline_indicators = [
+            "I can only help with SQL",
+            "database queries only",
+            "not related to database"
+        ]
+        
+        if any(indicator.lower() in response.lower() for indicator in decline_indicators):
+            return "I can only help with SQL database queries. Please ask about your database data."
+        
+        # Try to extract SQL from code blocks
+        code_match = re.search(r'```(?:sql)?\s*\n?(.*?)\n?```', response, re.DOTALL | re.IGNORECASE)
+        if code_match:
+            return code_match.group(1).strip()
+        
+        # If no code blocks found, check if it looks like SQL
+        if any(keyword in response.upper() for keyword in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'WITH']):
+            # Clean up the response
+            cleaned = re.sub(r'^[^A-Z]*?(SELECT|INSERT|UPDATE|DELETE|WITH)', r'\1', response, flags=re.IGNORECASE | re.MULTILINE)
+            return cleaned.strip()
+        
+        # If it doesn't look like SQL, it might be a clarification question
+        return response.strip()
