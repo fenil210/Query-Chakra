@@ -30,7 +30,7 @@ connectionstring = {
     'Database': os.environ['DB'],
     'user': os.environ['USER'],
     'host': os.environ['HOST'],
-    'port': os.environ['PORT']
+    'port_mysql': os.environ['PORT_MYSQL']
 }
 
 # Global variables

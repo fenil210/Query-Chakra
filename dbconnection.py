@@ -13,7 +13,7 @@ load_dotenv(dotenv_path=nv_path)
 class dbactivities:
     def __init__(self):
         self.host = os.environ['HOST'] 
-        self.port = os.environ['PORT']
+        self.port_mysql = os.environ['port_mysql']
         self.database = os.environ['DB']
         self.username = os.environ['USER']
         self.password = os.environ['PASSWORD']
